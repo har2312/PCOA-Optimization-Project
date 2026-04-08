@@ -3,8 +3,10 @@ Modified Pine Cone Optimization Algorithm (MPCOA)
 
 Modifications over the base PCOA:
   1. Levy flight scaling in wind pollination (Algorithm 1)
-     - Replaces uniform scaling of difference vectors with heavy-tailed
-       Levy flight steps for better exploration on multimodal landscapes.
+     - Heavy-tailed steps for better exploration on multimodal landscapes.
+  2. Chaotic map initialization (Logistic Map)
+     - Replaces pseudo-random init with chaotic sequences for better
+       initial coverage of the search space.
 
 Reference (base):
     Anaraki, M.V. & Farzin, S. (2024).
@@ -31,6 +33,35 @@ def levy_flight(dim, beta=1.5):
     return step
 
 
+# ---------------------------------------------------------------------------
+# Utility: Logistic Map chaotic sequence
+# ---------------------------------------------------------------------------
+def logistic_map(n_points, dim, seed=None):
+    """Generate chaotic numbers in [0,1] using the Logistic Map.
+
+    x_{n+1} = r * x_n * (1 - x_n),  r = 4  (fully chaotic regime)
+
+    Returns an (n_points, dim) array of values in (0, 1).
+    Chaotic sequences provide more uniform space coverage than
+    pseudo-random numbers, reducing initial clustering.
+    """
+    r = 4.0
+    if seed is None:
+        x = 0.1 + 0.8 * np.random.rand(dim)  # start in (0.1, 0.9)
+    else:
+        rng = np.random.RandomState(seed)
+        x = 0.1 + 0.8 * rng.rand(dim)
+
+    # Avoid fixed points at 0, 0.25, 0.5, 0.75, 1.0
+    x = np.clip(x, 0.01, 0.99)
+
+    result = np.zeros((n_points, dim))
+    for i in range(n_points):
+        x = r * x * (1 - x)
+        result[i] = x
+    return result
+
+
 # ===================================================================
 # MPCOA Class  (Modified PCOA)
 # ===================================================================
@@ -38,12 +69,9 @@ class MPCOA:
     """Modified Pine Cone Optimization Algorithm.
 
     Modification 1: Levy flight in pollination
-    -------------------------------------------
-    The position update in Algorithm 1 (wind pollination) now uses
-    Levy flight step vectors to scale the difference vectors.  This
-    produces mostly small steps (local search) with occasional large
-    jumps (escaping local optima), improving performance on multimodal
-    functions.
+        Heavy-tailed step scaling for better exploration.
+    Modification 2: Chaotic map initialization
+        Logistic Map sequences replace pseudo-random init.
 
     Parameters  (same as base PCOA)
     ----------
@@ -90,14 +118,26 @@ class MPCOA:
             self.best_pos = x.copy()
         return f
 
-    # ------------------------------------------------------------------
-    # Initialization  (Eqs 1-3)
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # MODIFICATION 2: Chaotic map initialization
+    # ==================================================================
     def _initialize(self):
+        """Initialize population using Logistic Map chaotic sequences.
+
+        CHANGED from base PCOA:
+        - Cone positions use chaotic sequences instead of pseudo-random
+          numbers.  The Logistic Map x_{n+1} = 4*x*(1-x) generates
+          numbers that appear random but cover the space more uniformly,
+          reducing the chance of initial clustering and improving the
+          starting quality of the population.
+        """
         self.cone_pos = np.zeros((self.pop_size, self.dim))
         self.cone_fit = np.full(self.pop_size, np.inf)
         self.tree_pos = np.zeros((self.n_tree, self.dim))
         self.tree_fit = np.full(self.n_tree, np.inf)
+
+        # Generate chaotic sequences for initialization
+        chaos = logistic_map(self.pop_size, self.dim)
 
         for i in range(self.n_tree):
             lbs = self.lb + i * (self.ub - self.lb) / self.n_tree
@@ -106,10 +146,8 @@ class MPCOA:
 
             for j in range(self.n_cone):
                 idx = i * self.n_cone + j
-                rand_vec = np.random.rand(self.dim)
-                r1 = np.random.rand()
-                r2 = np.random.rand()
-                self.cone_pos[idx] = lbs + rand_vec * (r1 * ubs - r2 * lbs)
+                # Use chaotic values instead of np.random.rand()
+                self.cone_pos[idx] = lbs + chaos[idx] * (ubs - lbs)
                 self.cone_pos[idx] = np.clip(self.cone_pos[idx], self.lb, self.ub)
                 self.cone_fit[idx] = self._eval(self.cone_pos[idx])
 

@@ -77,4 +77,56 @@ The base PCOA uses **uniform random numbers** to scale the difference vectors in
 
 ---
 
+## Modification 2: Chaotic Map Initialization (Logistic Map)
+
+**Commit**: `Add chaotic map initialization`
+**File**: `src/mpcoa.py`
+
+### What was changed
+
+The population initialization now uses the **Logistic Map** chaotic sequence instead of pseudo-random numbers.
+
+**Before (base PCOA):**
+```python
+cone_pos[idx] = LbS + np.random.rand(dim) * (UbS - LbS)
+```
+
+**After (modified):**
+```python
+chaos = logistic_map(pop_size, dim)    # chaotic sequence in [0, 1]
+cone_pos[idx] = LbS + chaos[idx] * (UbS - LbS)
+```
+
+Where the Logistic Map is:
+```
+x_{n+1} = r × x_n × (1 - x_n),  r = 4
+```
+Starting from a random seed in (0.1, 0.9) per dimension.
+
+### Why this modification
+
+Pseudo-random number generators (like `np.random.rand()`) can produce **clusters and gaps** in the initial population, especially in high dimensions. This means:
+
+1. **Some regions of the search space may have no initial agents** — if the global optimum is there, it may never be found
+2. **Multiple agents may start very close together** — wasting evaluations on redundant search
+3. **The Logistic Map at r=4 is ergodic** — it visits every sub-interval of [0,1] with equal frequency, giving guaranteed uniform coverage
+
+### Expected effect
+
+| Aspect | Before (pseudo-random) | After (chaotic) |
+|--------|----------------------|-----------------|
+| Space coverage | Probabilistically uniform, but may cluster | Deterministically more uniform |
+| Initial population quality | Variable | More consistently spread |
+| Reproducibility | Seed-dependent | More robust across seeds |
+| High-dimensional spaces | Gaps increase with dimension | Chaotic sequences maintain coverage |
+| Computational cost | Same | Same (negligible overhead) |
+
+### How it helps
+
+- **Better starting positions** → algorithm finds good regions faster in early generations
+- **Reduced sensitivity to random seed** → more consistent results across runs (lower std)
+- **Particularly beneficial for narrow-basin functions** (Rosenbrock, Schwefel) where initial placement near the valley matters
+
+---
+
 *More modifications will be added below as they are implemented.*
