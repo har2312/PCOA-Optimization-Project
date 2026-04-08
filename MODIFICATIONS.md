@@ -129,4 +129,52 @@ Pseudo-random number generators (like `np.random.rand()`) can produce **clusters
 
 ---
 
+## Modification 3: Nonlinear Adaptive Boundary Decay
+
+**Commit**: `Add nonlinear boundary decay`
+**File**: `src/mpcoa.py`
+
+### What was changed
+
+The boundary shrinking weight `W` (Eq 9) now uses a **cosine-based nonlinear curve** instead of a linear ramp.
+
+**Before (base PCOA, Eq 9):**
+```
+W = min(fes / max_fes, 0.5)
+```
+This is a straight line from 0 to 0.5 — boundaries shrink at a constant rate.
+
+**After (modified):**
+```
+t = fes / max_fes
+W = min(0.5 × (1 − cos(π × t)), 0.5)
+```
+
+The cosine curve produces an **S-shaped** transition:
+- **Early phase (t ≈ 0)**: W ≈ 0 → boundaries stay wide → full exploration
+- **Mid phase (t ≈ 0.5)**: W grows fastest → rapid transition to exploitation
+- **Late phase (t ≈ 1)**: W ≈ 0.5 → boundaries stabilize → fine-tuning
+
+### Why this modification
+
+The base PCOA's linear boundary shrinking has a fundamental problem:
+
+1. **Too aggressive early on** — at t=0.2, the linear W is already 0.2, shrinking bounds by 20%. This can cut off unexplored regions before the algorithm finds promising areas
+2. **Too slow at the end** — the linear ramp provides equal shrinkage rate at all stages, giving no special fine-tuning phase
+3. **No adaptation to problem difficulty** — hard problems need more exploration time; the cosine curve naturally provides this with its slow start
+
+### Expected effect
+
+| Phase | Linear (base) | Cosine (modified) | Benefit |
+|-------|--------------|-------------------|---------|
+| t = 0.1 | W = 0.10 (10% shrink) | W = 0.02 (2% shrink) | **8× wider** exploration early |
+| t = 0.3 | W = 0.30 (30% shrink) | W = 0.15 (15% shrink) | **2× wider** — still exploring |
+| t = 0.5 | W = 0.50 (max) | W = 0.50 (max) | Same at midpoint |
+| t = 0.7 | W = 0.50 (max) | W = 0.50 (max) | Same — full exploitation |
+
+- **Multimodal functions**: Longer exploration phase → better chance of finding the global basin
+- **Unimodal functions**: No harm — the late-phase exploitation is equally strong
+
+---
+
 *More modifications will be added below as they are implemented.*

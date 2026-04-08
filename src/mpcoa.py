@@ -7,6 +7,9 @@ Modifications over the base PCOA:
   2. Chaotic map initialization (Logistic Map)
      - Replaces pseudo-random init with chaotic sequences for better
        initial coverage of the search space.
+  3. Nonlinear adaptive boundary decay (cosine curve)
+     - Replaces linear W with cosine-based decay for smoother
+       exploration→exploitation transition.
 
 Reference (base):
     Anaraki, M.V. & Farzin, S. (2024).
@@ -168,11 +171,26 @@ class MPCOA:
         self.mem_k = 0
         self.archive = []
 
-    # ------------------------------------------------------------------
-    # Boundary update  (Eqs 7-11)
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # MODIFICATION 3: Nonlinear adaptive boundary decay
+    # ==================================================================
     def _update_bounds(self):
-        W = min(self.fes / self.max_fes, 0.5)
+        """Boundary shrinking with cosine-based nonlinear decay.
+
+        CHANGED from base PCOA:
+        - Base uses linear:  W = min(fes/max_fes, 0.5)
+        - Modified uses cosine: W = 0.5 * (1 - cos(π * t))
+          where t = fes / max_fes
+
+        The cosine curve starts slow (preserving wide search space for
+        exploration), accelerates in the middle, and decelerates near
+        the end (fine-grained exploitation).  This avoids the base's
+        problem of shrinking too fast early on, which can trap the
+        algorithm before it discovers promising regions.
+        """
+        t = self.fes / self.max_fes
+        W = 0.5 * (1 - np.cos(np.pi * t))   # range [0, 1], capped below
+        W = min(W, 0.5)                       # same cap as base
         radius_lb = self.best_pos - self.lb
         radius_ub = self.ub - self.best_pos
         Lb = self.lb + radius_lb * W
