@@ -96,7 +96,7 @@ class PCOA:
         return f
 
     # ------------------------------------------------------------------
-    # Initialization  (Eqs 4-6, control_param = 0)
+    # Initialization  (Eqs 1-3)
     # ------------------------------------------------------------------
     def _initialize(self):
         self.cone_pos = np.zeros((self.pop_size, self.dim))
@@ -105,15 +105,21 @@ class PCOA:
         self.tree_fit = np.full(self.n_tree, np.inf)
 
         for i in range(self.n_tree):
-            # Segment bounds (Eqs 5-6 with original lb/ub)
+            # Segment bounds (Eqs 1-2, paper uses 1-indexed so i_paper = i+1)
+            # Eq 1: LbS = lb + (i-1) * (ub - lb) / N_tree
+            # Eq 2: UbS = ub + (i-1) * (ub - lb) / N_tree
             lbs = self.lb + i * (self.ub - self.lb) / self.n_tree
-            ubs = self.lb + (i + 1) * (self.ub - self.lb) / self.n_tree
+            ubs = self.ub + i * (self.ub - self.lb) / self.n_tree
             self.tree_pos[i] = (lbs + ubs) / 2.0
 
             for j in range(self.n_cone):
                 idx = i * self.n_cone + j
-                # Eq 4 (control_param=0): scatter around tree
-                self.cone_pos[idx] = lbs + np.random.rand(self.dim) * (ubs - lbs)
+                # Eq 3: CX = LbS + rand_vec * (rand1 * UbS - rand2 * LbS)
+                rand_vec = np.random.rand(self.dim)
+                r1 = np.random.rand()
+                r2 = np.random.rand()
+                self.cone_pos[idx] = lbs + rand_vec * (r1 * ubs - r2 * lbs)
+                self.cone_pos[idx] = np.clip(self.cone_pos[idx], self.lb, self.ub)
                 self.cone_fit[idx] = self._eval(self.cone_pos[idx])
 
         # Best
@@ -154,9 +160,12 @@ class PCOA:
         return Lb, Ub
 
     def _seg_bounds(self, tree_i, Lb, Ub):
-        """Segment bounds for tree i  (Eqs 5-6)."""
+        """Segment bounds for tree i  (Eqs 5-6, 0-indexed).
+        Eq 5: LbS = Lb + (i-1) * (Ub - Lb) / N_tree
+        Eq 6: UbS = Ub + (i-1) * (Ub - Lb) / N_tree
+        """
         LbS = Lb + tree_i * (Ub - Lb) / self.n_tree
-        UbS = Lb + (tree_i + 1) * (Ub - Lb) / self.n_tree
+        UbS = Ub + tree_i * (Ub - Lb) / self.n_tree
         return LbS, UbS
 
     # ------------------------------------------------------------------
@@ -263,30 +272,33 @@ class PCOA:
         n_best = max(1, int(self.tbest_rate * self.pop_size))
         sorted_idx = np.argsort(self.cone_fit)
 
-        for idx in range(self.pop_size):
-            if self.fes >= self.max_fes:
-                break
-
-            # phi_i  (Eq 13-14)
+        # Pre-compute phi for ALL cones (Eqs 13-14)
+        # Eq 12 uses phi_r1 and phi_r3 (different cones' phi values)
+        phi_all = np.zeros(self.pop_size)
+        for i in range(self.pop_size):
             sum_a = 0.0
             for j in range(self.pop_size):
-                if j == idx:
+                if j == i:
                     continue
-                d = max(np.linalg.norm(self.cone_pos[idx] - self.cone_pos[j]), 1.0)
+                d = max(np.linalg.norm(self.cone_pos[i] - self.cone_pos[j]), 1.0)
                 a_ij = (self.beta_poll / d ** self.alpha_poll -
                         self.alpha_poll / d ** self.beta_poll) / \
                        (self.beta_poll - self.alpha_poll)
                 sum_a += a_ij
-            phi = 1 - np.exp(-self.gamma_poll * abs(sum_a))
+            phi_all[i] = 1 - np.exp(-self.gamma_poll * abs(sum_a))  # Eq 13
+
+        for idx in range(self.pop_size):
+            if self.fes >= self.max_fes:
+                break
 
             r1 = self._rand_idx_excl(self.pop_size, {idx})
             r3 = self._rand_idx_excl(self.pop_size, {idx, r1})
             tb = self.cone_pos[sorted_idx[np.random.randint(n_best)]]
 
-            # Eq 12
+            # Eq 12: uses phi_r1 and phi_r3 (per-cone phi values)
             cx_new = self.cone_pos[idx] + \
-                     0.5 * phi * (tb - self.cone_pos[r1]) + \
-                     0.5 * phi * (tb - self.cone_pos[r3])
+                     0.5 * phi_all[r1] * (tb - self.cone_pos[r1]) + \
+                     0.5 * phi_all[r3] * (tb - self.cone_pos[r3])
 
             cx_new = np.clip(cx_new, self.lb, self.ub)
             f_new = self._eval(cx_new)
@@ -321,13 +333,13 @@ class PCOA:
                 pass
 
             # --- Operator 2: Levy-based dispersal (Eq 16) ---
+            # Eq 16: X_animal = (X_best + X_rand)/2 + levy*(levy*(lb+ub-(X_best+X_rand)/2) - (X_best+X_rand)/2)
             if self.fes < self.max_fes:
                 lev = levy_flight(self.dim)
                 r = np.random.randint(self.pop_size)
-                x_a2 = self.cone_pos[r]
-                x_animal = (self.best_pos + x_a2 +
-                            lev * (lev * (self.lb + self.ub - self.best_pos + x_a2)
-                                   - self.best_pos + x_a2))
+                x_rand = self.cone_pos[r]
+                mid = (self.best_pos + x_rand) / 2.0
+                x_animal = mid + lev * (lev * (self.lb + self.ub - mid) - mid)
                 x_animal = np.clip(x_animal, self.lb, self.ub)
                 f_a = self._eval(x_animal)
                 if f_a < self.best_fit:
