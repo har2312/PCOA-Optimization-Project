@@ -1,31 +1,11 @@
-# Python
+# Python overrides
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
 
-# Virtual environment
-venv/
-env/
-.venv/
-
-# IDE
+# IDEs
 .vscode/
-.idea/
-*.swp
-*.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Distribution
-dist/
-build/
-*.egg-info/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Misc
-*.log
+# Ignore all auto-generated result files
+results/*.csv
+results/*.jsonl
+results/plots/*.png
