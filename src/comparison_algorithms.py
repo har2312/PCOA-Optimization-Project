@@ -119,23 +119,24 @@ def run_algorithm(algo_key, obj_func, lb, ub, dim, max_fes, pop_size=30):
 
     best_fit = model.g_best.target.fitness
     best_pos = model.g_best.solution
+    convergence = model.history.list_global_best_fit
 
-    return best_fit, best_pos
+    return best_fit, best_pos, convergence
 
 
 def run_all_algorithms(obj_func, lb, ub, dim, max_fes, pop_size=30):
     """Run all 7 comparison algorithms.
 
-    Returns dict of {algo_key: (best_fit, best_pos)}
+    Returns dict of {algo_key: (best_fit, best_pos, convergence)}
     """
     results = {}
     for key in ALGORITHMS:
         try:
-            fit, pos = run_algorithm(key, obj_func, lb, ub, dim, max_fes, pop_size)
-            results[key] = (fit, pos)
+            fit, pos, conv = run_algorithm(key, obj_func, lb, ub, dim, max_fes, pop_size)
+            results[key] = (fit, pos, conv)
         except Exception as e:
             print(f"  [WARN] {key} failed: {e}")
-            results[key] = (np.inf, None)
+            results[key] = (np.inf, None, [])
     return results
 
 
@@ -163,7 +164,7 @@ if __name__ == "__main__":
     print("-" * 60)
 
     results = run_all_algorithms(sphere, -100, 100, dim, max_fes)
-    for key, (fit, pos) in results.items():
-        print(f"  {key:>4}: {fit:.6e}")
+    for key, (fit, pos, conv) in results.items():
+        print(f"  {key:>4}: {fit:.6e} (conv lens: {len(conv)})")
 
     print("\n[PASS] All comparison algorithms working.")

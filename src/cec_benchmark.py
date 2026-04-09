@@ -22,6 +22,7 @@ import opfunu.cec_based.cec2014 as cec2014_mod
 import opfunu.cec_based.cec2017 as cec2017_mod
 import opfunu.cec_based.cec2020 as cec2020_mod
 import opfunu.cec_based.cec2022 as cec2022_mod
+from engineering_problems import get_engineering_functions
 
 # CEC suite configurations
 CEC_SUITES = {
@@ -53,6 +54,13 @@ CEC_SUITES = {
         "bounds": (-100, 100),
         "note": "12 functions for single-objective optimization",
     },
+    "engineering": {
+        "module": None,
+        "class_fmt": "Eng{fid}",
+        "func_ids": list(range(1, 5)),
+        "bounds": (0, 100), # Handled dynamically
+        "note": "4 standard constrained engineering design problems",
+    }
 }
 
 
@@ -119,6 +127,10 @@ def get_cec_functions(suite, dim=10):
     list of (fid, func, info) tuples
     """
     suite = suite.lower()
+    
+    if suite == "engineering":
+        return get_engineering_functions()
+        
     cfg = CEC_SUITES[suite]
     results = []
 
