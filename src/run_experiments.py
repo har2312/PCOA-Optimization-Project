@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from pcoa import pcoa
 from mpcoa import mpcoa
 from comparison_algorithms import run_all_algorithms, ALGORITHMS
-from cec_benchmark import get_all_suites
+from cec_benchmark import get_cec_functions, CEC_SUITES
 
 # Experiment Settings
 DIM = 10
@@ -32,31 +32,30 @@ RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "results"
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
-def run_experiment_on_function(func_name, func_obj, lb, ub, dim, max_fes, n_runs):
-    """Run all 9 algorithms `n_runs` times on a single function."""
+def run_experiment_on_function(func_name, suite_name, func_obj, lb, ub, dim, max_fes, n_runs, out_csv):
+    """Run all 9 algorithms `n_runs` times on a single function, saving to CSV incrementally."""
     
-    # Initialize storage.
-    # We want a dict: {"PCOA": [run1, run2...], "MPCOA": [...], "PSO": [...]}
     algo_names = ["PCOA", "MPCOA"] + list(ALGORITHMS.keys())
-    results = {a: [] for a in algo_names}
     
-    # Using the standard signature from opfunu evaluate
+    # The func_obj returned by get_cec_functions is already a callable evaluate function
     def obj_wrapper(x):
-        return func_obj.evaluate(x)
+        return func_obj(x)
         
     for run in range(n_runs):
+        print(f"\n    Run {run+1}/{n_runs}... ", end="", flush=True)
         # Always set seed for reproducibility within a run across algorithms
         seed = run * 42
+        row_data = {}
         
         # 1. PCOA
         np.random.seed(seed)
         best_f_pcoa, _, _ = pcoa(obj_wrapper, lb, ub, dim, max_fes)
-        results["PCOA"].append(best_f_pcoa)
+        row_data["PCOA"] = best_f_pcoa
         
         # 2. MPCOA
         np.random.seed(seed)
         best_f_mpcoa, _, _ = mpcoa(obj_wrapper, lb, ub, dim, max_fes)
-        results["MPCOA"].append(best_f_mpcoa)
+        row_data["MPCOA"] = best_f_mpcoa
         
         # 3. Mealpy algorithms
         np.random.seed(seed)
@@ -64,14 +63,19 @@ def run_experiment_on_function(func_name, func_obj, lb, ub, dim, max_fes, n_runs
         random.seed(seed)
         mealpy_res = run_all_algorithms(obj_wrapper, lb, ub, dim, max_fes)
         
-        for alg_key in list(ALGORITHMS.keys()):
-            results[alg_key].append(mealpy_res[alg_key][0])
+        for alg_key in ALGORITHMS.keys():
+            row_data[alg_key] = mealpy_res[alg_key][0]
             
-    return results
+        # Append this run's data to CSV immediately
+        with open(out_csv, "a") as f:
+            row = [suite_name, func_name, str(run)]
+            for a in algo_names:
+                row.append(str(row_data[a]))
+            f.write(",".join(row) + "\n")
+            
+        print("Done.", end="", flush=True)
 
 def main():
-    suites = get_all_suites(dim=DIM)
-    
     timestamp = datetime.now().strftime("%Y%md_%H%M%S")
     out_csv = os.path.join(RESULTS_DIR, f"raw_results_{DIM}D_{timestamp}.csv")
     
@@ -85,9 +89,11 @@ def main():
     print(f"Results will be saved incrementally to: {out_csv}")
     print("-" * 60)
     
-    for suite_name, funcs in suites.items():
+    for suite_name in CEC_SUITES.keys():
         print(f"\nEvaluating Suite: {suite_name}")
-        for func_name, func_obj in funcs.items():
+        functions = get_cec_functions(suite_name, dim=DIM)
+        for fid, func_obj, info in functions:
+            func_name = info['name']
             print(f"  Running {func_name} ...", end="", flush=True)
             
             # Note: For CEC bounds, some functions might have varying bounds, 
@@ -100,22 +106,14 @@ def main():
                 # Could be read from func_obj.lb, func_obj.ub
                 lb = -100
                 ub = 100
-                if hasattr(func_obj, 'lb') and hasattr(func_obj, 'ub'):
-                    pass # We'll just rely on standard -100, 100 for CEC constraints as required by most literature guidelines unless specified.
+                if 'lb' in info and 'ub' in info:
+                    lb = info['lb']
+                    ub = info['ub']
                 
-                res = run_experiment_on_function(
-                    func_name, func_obj, lb, ub, DIM, MAX_FES, N_RUNS
+                run_experiment_on_function(
+                    func_name, suite_name, func_obj, lb, ub, DIM, MAX_FES, N_RUNS, out_csv
                 )
-                
-                # Append to CSV
-                with open(out_csv, "a") as f:
-                    for run in range(N_RUNS):
-                        row = [suite_name, func_name, str(run)]
-                        for a in algo_names:
-                            row.append(str(res[a][run]))
-                        f.write(",".join(row) + "\n")
-                
-                print(" Done.")
+                print("\n  Finished completely.")
                 
             except Exception as e:
                 print(f" ERROR: {e}")
