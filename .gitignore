@@ -9,3 +9,6 @@ __pycache__/
 results/*.csv
 results/*.jsonl
 results/plots/*.png
+
+
+.DS_Store/
