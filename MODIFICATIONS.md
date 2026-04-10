@@ -175,6 +175,81 @@ The base PCOA's linear boundary shrinking has a fundamental problem:
 - **Multimodal functions**: Longer exploration phase → better chance of finding the global basin
 - **Unimodal functions**: No harm — the late-phase exploitation is equally strong
 
+## Modification 4: Dynamic Lévy Flight Scaling & Stagnation Burst (Fix A)
+
+**Commit**: `Add dynamic Lévy scaling and stagnation detection`
+**File**: `src/mpcoa.py`
+
+### What was changed
+
+In the original v1 modification, Lévy flights were applied with a constant magnitude multiplier. In v2, the Lévy step magnitude is now **dynamically scaled** across the iteration budget:
+1. **Cosine Annealing Schedule:** The scaling factor `alpha` decays nonlinearly from a maximum (`levy_alpha_max` = 1.5) to a minimum (`levy_alpha_min` = 0.01) as evaluations progress.
+2. **Stagnation Burst:** A `stag_counter` monitors the global best fitness. If fitness fails to improve for 30 consecutive iterations (`stag_limit`), the algorithm forces a temporary "burst" by multiplying the Lévy magnitude by `stag_boost` (7.0) to violently eject trapped populations.
+
+### Why this modification
+
+The stagnation problem observed on multi-modal functions like CEC2014 F4 (where variance dropped to near zero) occurs because constant large Lévy flights disrupt fine-tuning convergence, while strictly small flights fail to escape deep basins. 
+- Early iterations require massive explosive jumps.
+- Late iterations require microscopic precision steps.
+- If completely stuck, the algorithm needs a "panic button" to break out of a hopeless local crater.
+
+### Expected effect
+
+| Phase | Before (Constant Lévy) | After (Dynamic Levy + Burst) |
+|-------|-----------------------|------------------------------|
+| Early Search | Medium random jumps | Explosive, space-spanning jumps |
+| Late Search | Disruptive jumps | Micro-fine precision tuning |
+| Stagnation Event | Permanent entrapment | Violent ejection to new basins |
+| CEC2014 F4 Variance | Near zero | High — guaranteed continued exploration |
+
+---
+
+## Modification 5: Restricted Segment Communication (Fix B)
+
+**Commit**: `Add exponential decay to segment communication`
+**File**: `src/mpcoa.py`
+
+### What was changed
+
+The cooperative mechanism sharing information between different pine trees/segments was heavily restricted.
+1. **Exponential Decay Probability:** Segments no longer share information 100% of the time. The probability of communication decays exponentially ($\approx e^{-6t}$), starting at ~90% and ending at ~5%.
+2. **Gated Acceptance:** A segment only adopts the global best if it probabilistically decides to; otherwise, it strictly adheres to its own local segment best.
+
+### Why this modification
+
+The "Parent Problem" caused MPCOA to underperform the base PCOA on functions like CEC2014 F1. Because the parallel populations were sharing information every single iteration, they were converging onto each other's sub-optimal vectors far too soon. 
+Restricting communication ensures parallel populations evolve independently and maintain high diversity, only sharing breakthroughs when mathematically advantageous.
+
+### Expected effect
+
+- **Diversity Maintenance:** Parallel sub-populations will no longer violently collapse into a single point prematurely.
+- **Improved F1 Performance:** Independent exploration paths prevent the algorithm from being dragged down by early, false-positive global bests.
+
+---
+
+## Modification 6: Personal-Best (pBest) Memory & Swarm Blending (Fix C)
+
+**Commit**: `Add pBest individual memory and PSO blending`
+**File**: `src/mpcoa.py`
+
+### What was changed
+
+Inspired by Particle Swarm Optimization (PSO), every individual cone now strictly maintains a historical record of its personal-best position (`pBest`) and fitness. The Animal Dispersal equations (exploitation phase) were blended with PSO velocity terms:
+```python
+cognitive_term = c1 * r1 * (pBest - current_pos)
+social_term = c2 * r2 * (gBest - current_pos)
+```
+The cognitive coefficient `c1` decays linearly (2.0 → 0.5) while the social coefficient `c2` grows (0.5 → 2.0).
+
+### Why this modification
+
+Nature-inspired leaders like PSO and SCA continuously dictate performance benchmarks because they exploit independent individual memory. PCOA originally only had a single "global best" and "segment best" memory. Without `pBest`, individual cones had zero "fine-tuning" memory precision. Blending PSO mechanics into the animal dispersal phase mathematically secures MPCOA the exact precision that makes PSO S-tier.
+
+### Expected effect
+
+- **Superior Exploitation:** Deep, surgical fine-tuning on unimodal functions and exact basin extraction.
+- **Leaderboard Dominance:** Closing the precision gap against PSO and SCA on functions where exact coordinate precision inherently dictates the final fitness score.
+
 ---
 
 *More modifications will be added below as they are implemented.*

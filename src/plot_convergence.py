@@ -19,37 +19,37 @@ PLOTS_DIR = os.path.join(RESULTS_DIR, "plots")
 if not os.path.exists(PLOTS_DIR):
     os.makedirs(PLOTS_DIR)
 
-def find_latest_jsonl():
-    """Find the most recent convergence JSONL in the results directory."""
+def get_all_jsonls():
+    """Find all convergence JSONLs in the results directory."""
     files = glob.glob(os.path.join(RESULTS_DIR, "convergence*.jsonl"))
     if not files:
         raise FileNotFoundError(f"No convergence data found in {RESULTS_DIR}. Please run run_experiments.py first.")
-    files.sort(key=os.path.getmtime, reverse=True)
-    return files[0]
+    return files
 
 def plot_convergence():
-    json_path = find_latest_jsonl()
-    print(f"Reading convergence data from: {json_path}")
+    json_paths = get_all_jsonls()
     
     # Data is deeply nested: data[Suite][Function][Algo] = List of lists (one per run)
     data = {}
     
-    with open(json_path, 'r') as f:
-        for line in f:
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            suite = record["Suite"]
-            func = record["Function"]
-            conv = record["Convergence"] # dict: algo -> list
-            
-            if suite not in data:
-                data[suite] = {}
-            if func not in data[suite]:
-                data[suite][func] = {alg: [] for alg in conv.keys()}
+    for json_path in json_paths:
+        print(f"Reading convergence data from: {json_path}")
+        with open(json_path, 'r') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                suite = record["Suite"]
+                func = record["Function"]
+                conv = record["Convergence"] # dict: algo -> list
                 
-            for alg, curve in conv.items():
-                data[suite][func][alg].append(curve)
+                if suite not in data:
+                    data[suite] = {}
+                if func not in data[suite]:
+                    data[suite][func] = {alg: [] for alg in conv.keys()}
+                    
+                for alg, curve in conv.items():
+                    data[suite][func][alg].append(curve)
 
     print(f"Found {len(data)} suites. Generating plots...")
 
@@ -95,7 +95,8 @@ def plot_convergence():
             plt.grid(True, which="both", ls="--", alpha=0.5)
             plt.tight_layout()
             
-            out_path = os.path.join(PLOTS_DIR, f"conv_{suite}_{func_name}.png")
+            safe_name = func_name.replace("/", "-").replace("\\", "-")
+            out_path = os.path.join(PLOTS_DIR, f"conv_{suite}_{safe_name}.png")
             plt.savefig(out_path, dpi=300)
             plt.close()
             

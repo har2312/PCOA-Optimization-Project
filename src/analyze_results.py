@@ -18,95 +18,88 @@ from scipy.stats import ranksums
 
 RESULTS_DIR = os.path.dirname(__file__).replace("src", "results")
 
-def find_latest_results():
-    """Find the most recent raw_results CSV in the results directory."""
+def get_all_results():
+    """Find all raw_results CSVs in the results directory."""
     files = glob.glob(os.path.join(RESULTS_DIR, "raw_results_*.csv"))
     if not files:
         raise FileNotFoundError(f"No results found in {RESULTS_DIR}. Please run run_experiments.py first.")
-    # Sort by modification time
-    files.sort(key=os.path.getmtime, reverse=True)
-    return files[0]
+    return files
 
-def analyze_results(csv_path):
-    print(f"Analyzing data from: {csv_path}\n")
-    df = pd.read_csv(csv_path)
-    
-    # Identify algorithm columns
-    base_cols = ["Suite", "Function", "Run"]
-    algos = [c for c in df.columns if c not in base_cols]
-    
-    # We assume MPCOA is our proposed algorithm to compare against
-    target_algo = "MPCOA"
-    if target_algo not in algos:
-        print(f"Error: {target_algo} not found in results.")
-        return
-        
-    other_algos = [a for a in algos if a != target_algo]
-    
+def analyze_results(csv_paths):
     stats_rows = []
     wilcoxon_rows = []
     rank_rows = []
-    
-    # Group by Suite and Function
-    grouped = df.groupby(["Suite", "Function"], sort=False)
-    
-    for (suite, func), group in grouped:
-        # 1. Calculate Mean and Std
-        means = group[algos].mean()
-        stds = group[algos].std()
+
+    for csv_path in csv_paths:
+        print(f"Analyzing data from: {csv_path}")
+        df = pd.read_csv(csv_path)
         
-        row_stats = {"Suite": suite, "Function": func}
-        for a in algos:
-            row_stats[f"{a}_Mean"] = means[a]
-            row_stats[f"{a}_Std"] = stds[a]
-        stats_rows.append(row_stats)
+        # Identify algorithm columns
+        base_cols = ["Suite", "Function", "Run"]
+        algos = [c for c in df.columns if c not in base_cols]
         
-        # 2. Ranking based on Mean fitness (lowest is best)
-        # Using min method for ties
-        ranks = means.rank(method="min", ascending=True)
-        row_ranks = {"Suite": suite, "Function": func}
-        row_ranks.update(ranks.to_dict())
-        rank_rows.append(row_ranks)
-        
-        # 3. Wilcoxon rank-sum test: MPCOA vs Others
-        # p < 0.05 means significant difference. 
-        # We also want to know if MPCOA is better (+) or worse (-) or tied (≈)
-        row_wilc = {"Suite": suite, "Function": func}
-        target_vals = group[target_algo].values
-        
-        for a in other_algos:
-            compare_vals = group[a].values
+        # We assume MPCOA is our proposed algorithm to compare against
+        target_algo = "MPCOA"
+        if target_algo not in algos:
+            print(f"Error: {target_algo} not found in {csv_path}.")
+            continue
             
-            # If all values are exactly the same (variance = 0), ranksums might warn or give nan
-            if np.array_equal(target_vals, compare_vals):
-                row_wilc[a] = "≈ (NaN)"
-                continue
+        other_algos = [a for a in algos if a != target_algo]
+        
+        # Group by Suite and Function
+        grouped = df.groupby(["Suite", "Function"], sort=False)
+        
+        for (suite, func), group in grouped:
+            # 1. Calculate Mean and Std
+            means = group[algos].mean()
+            stds = group[algos].std()
+            
+            row_stats = {"Suite": suite, "Function": func}
+            for a in algos:
+                row_stats[f"{a}_Mean"] = means[a]
+                row_stats[f"{a}_Std"] = stds[a]
+            stats_rows.append(row_stats)
+            
+            # 2. Ranking based on Mean fitness (lowest is best)
+            ranks = means.rank(method="min", ascending=True)
+            row_ranks = {"Suite": suite, "Function": func}
+            row_ranks.update(ranks.to_dict())
+            rank_rows.append(row_ranks)
+            
+            # 3. Wilcoxon rank-sum test: MPCOA vs Others
+            row_wilc = {"Suite": suite, "Function": func}
+            target_vals = group[target_algo].values
+            
+            for a in other_algos:
+                compare_vals = group[a].values
                 
-            stat, p_val = ranksums(target_vals, compare_vals)
-            
-            if p_val < 0.05:
-                # Significant! Is target better (smaller values) or worse?
-                if means[target_algo] < means[a]:
-                    symbol = "+"  # Target is significantly better
+                if np.array_equal(target_vals, compare_vals):
+                    row_wilc[a] = "≈ (NaN)"
+                    continue
+                    
+                stat, p_val = ranksums(target_vals, compare_vals)
+                
+                if p_val < 0.05:
+                    if means[target_algo] < means[a]:
+                        symbol = "+"  # Target is significantly better
+                    else:
+                        symbol = "-"  # Target is significantly worse
                 else:
-                    symbol = "-"  # Target is significantly worse
-            else:
-                symbol = "≈"  # No significant difference
+                    symbol = "≈"  # No significant difference
+                    
+                row_wilc[a] = f"{symbol} ({p_val:.2e})"
                 
-            row_wilc[a] = f"{symbol} ({p_val:.2e})"
+            wilcoxon_rows.append(row_wilc)
             
-        wilcoxon_rows.append(row_wilc)
-        
     # Create DataFrames
     df_stats = pd.DataFrame(stats_rows)
     df_ranks = pd.DataFrame(rank_rows)
     df_wilc = pd.DataFrame(wilcoxon_rows)
     
     # Save to disk
-    base_name = os.path.basename(csv_path).replace("raw_results_", "")
-    out_stats = os.path.join(RESULTS_DIR, f"mean_std_{base_name}")
-    out_ranks = os.path.join(RESULTS_DIR, f"ranks_{base_name}")
-    out_wilc = os.path.join(RESULTS_DIR, f"wilcoxon_{base_name}")
+    out_stats = os.path.join(RESULTS_DIR, "MASTER_mean_std.csv")
+    out_ranks = os.path.join(RESULTS_DIR, "MASTER_ranks.csv")
+    out_wilc = os.path.join(RESULTS_DIR, "MASTER_wilcoxon.csv")
     
     df_stats.to_csv(out_stats, index=False)
     df_ranks.to_csv(out_ranks, index=False)
@@ -122,7 +115,7 @@ def analyze_results(csv_path):
 
 if __name__ == "__main__":
     try:
-        latest_csv = find_latest_results()
-        analyze_results(latest_csv)
+        csv_files = get_all_results()
+        analyze_results(csv_files)
     except FileNotFoundError as e:
         print(e)
